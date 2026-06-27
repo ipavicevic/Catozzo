@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QProcess>
 #include <QTemporaryFile>
+#include <memory>
 
 class FfmpegRunner : public QObject
 {
@@ -35,7 +36,7 @@ private slots:
 
 private:
     QProcess m_process;
-    QTemporaryFile m_concatList;
+    std::unique_ptr<QTemporaryFile> m_concatList;
     bool m_running = false;
     int m_progress = 0;
     double m_totalDuration = 0.0;

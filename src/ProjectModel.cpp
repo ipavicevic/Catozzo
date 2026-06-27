@@ -50,6 +50,16 @@ bool ProjectModel::saveAs(const QString &path)
     QJsonObject updated = m_data;
     updated["modified"] = QDateTime::currentDateTime().toString(Qt::ISODate);
 
+    // On first save, default output filename to project name
+    QJsonObject output = updated["output"].toObject();
+    if (output["filename"].toString() == "combined.mp4") {
+        QString name = QFileInfo(path).baseName();
+        if (name.endsWith(".catozzo", Qt::CaseInsensitive))
+            name.chop(8);
+        output["filename"] = name + ".mp4";
+        updated["output"] = output;
+    }
+
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
         emit error("Cannot write file: " + path);

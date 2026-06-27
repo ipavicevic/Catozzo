@@ -29,7 +29,6 @@ void FfmpegRunner::exportProject(const QVariantMap &project)
 
     setRunning(true);
     setProgress(0);
-    qDebug() << "ffmpeg" << args;
     m_process.start("ffmpeg", args);
 }
 
@@ -107,24 +106,24 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
     for (const auto &c : clips)
         m_totalDuration += clipEffectiveDuration(c.toObject());
 
-    // Write concat demuxer list file
-    m_concatList.setFileTemplate(QDir::tempPath() + "/catozzo_concat_XXXXXX.txt");
-    if (!m_concatList.open()) {
+    // Write concat demuxer list file (fresh file each export)
+    m_concatList = std::make_unique<QTemporaryFile>(QDir::tempPath() + "/catozzo_concat_XXXXXX.txt");
+    if (!m_concatList->open()) {
         emit error("Cannot create temporary concat list file.");
         return {};
     }
     for (const auto &c : clips) {
         QString path = QDir(sourceFolder).filePath(c.toObject()["file"].toString());
         path.replace("'", "'\\''");
-        m_concatList.write(QString("file '%1'\n").arg(path).toUtf8());
+        m_concatList->write(QString("file '%1'\n").arg(path).toUtf8());
     }
-    m_concatList.flush();
+    m_concatList->flush();
 
     QStringList args;
     args << "-y"
          << "-f" << "concat"
          << "-safe" << "0"
-         << "-i" << m_concatList.fileName()
+         << "-i" << m_concatList->fileName()
          << "-c" << "copy"
          << m_outputPath;
 
