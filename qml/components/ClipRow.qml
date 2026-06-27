@@ -6,22 +6,25 @@ Rectangle {
     id: root
     height: 56
 
+    required property int index
     required property var clipData
-    required property int clipIndex
     required property string sourceFolder
     required property var scanner
 
-    signal clipChanged(int idx, var updated)
+    signal clipModified(int idx, var updated)
 
-    color: clipIndex % 2 === 0 ? palette.base : palette.alternateBase
+    onClipDataChanged: enabledCheck.checked = clipData["enabled"] !== false
+
+    color: index % 2 === 0 ? palette.base : palette.alternateBase
 
     RowLayout {
         anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
         spacing: 0
 
         CheckBox {
-            checked: root.clipData["enabled"] ?? true
-            onToggled: root.clipChanged(root.clipIndex,
+            id: enabledCheck
+            checked: root.clipData["enabled"] !== false
+            onToggled: root.clipModified(root.index,
                 Object.assign({}, root.clipData, { "enabled": checked }))
         }
 
@@ -70,7 +73,7 @@ Rectangle {
             }
             onActivated: {
                 let volumes = [null, 0.0, 1.0, 0.5]
-                root.clipChanged(root.clipIndex,
+                root.clipModified(root.index,
                     Object.assign({}, root.clipData, { "volume": volumes[currentIndex] }))
             }
         }
@@ -88,7 +91,7 @@ Rectangle {
                 let types = [null, "none", "crossfade", "fade_black"]
                 let type = types[currentIndex]
                 let transition = type ? { "type": type, "duration": root.clipData["transition"]?.["duration"] ?? 1.0 } : null
-                root.clipChanged(root.clipIndex,
+                root.clipModified(root.index,
                     Object.assign({}, root.clipData, { "transition": transition }))
             }
         }
@@ -102,7 +105,7 @@ Rectangle {
             valueFromText: (t) => Math.round(parseFloat(t) * 10)
             onValueModified: {
                 let t = Object.assign({}, root.clipData["transition"], { "duration": value / 10 })
-                root.clipChanged(root.clipIndex,
+                root.clipModified(root.index,
                     Object.assign({}, root.clipData, { "transition": t }))
             }
         }

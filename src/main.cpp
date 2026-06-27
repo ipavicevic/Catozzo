@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     app.setOrganizationName("Catozzo");
     app.setApplicationName("Catozzo");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion(APP_VERSION);
 
     qmlRegisterType<ProjectModel>("Catozzo", 1, 0, "ProjectModel");
     qmlRegisterType<ClipScanner>("Catozzo", 1, 0, "ClipScanner");

@@ -2,7 +2,9 @@
 
 #include <QObject>
 #include <QJsonObject>
+#include <QVariantMap>
 #include <QProcess>
+#include <QTemporaryFile>
 
 class FfmpegRunner : public QObject
 {
@@ -12,11 +14,12 @@ class FfmpegRunner : public QObject
 
 public:
     explicit FfmpegRunner(QObject *parent = nullptr);
+    ~FfmpegRunner();
 
     bool running() const { return m_running; }
     int progress() const { return m_progress; }
 
-    Q_INVOKABLE void exportProject(const QJsonObject &project);
+    Q_INVOKABLE void exportProject(const QVariantMap &project);
     Q_INVOKABLE void cancel();
 
 signals:
@@ -32,6 +35,7 @@ private slots:
 
 private:
     QProcess m_process;
+    QTemporaryFile m_concatList;
     bool m_running = false;
     int m_progress = 0;
     double m_totalDuration = 0.0;

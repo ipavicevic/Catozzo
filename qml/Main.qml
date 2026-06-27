@@ -32,6 +32,7 @@ ApplicationWindow {
         id: ffmpeg
         onFinished: (success, path) => statusBar.showMessage(success ? "Export complete: " + path : "Export failed")
         onError: (msg) => statusBar.showMessage("Error: " + msg)
+        onLogLine: (line) => { if (line.trim()) console.log("[ffmpeg]", line.trim()) }
         onProgressChanged: exportProgress.value = ffmpeg.progress
     }
 

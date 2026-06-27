@@ -2,6 +2,7 @@
 #include <QJsonArray>
 #include <QDir>
 #include <QRegularExpression>
+#include <QDebug>
 
 FfmpegRunner::FfmpegRunner(QObject *parent)
     : QObject(parent)
@@ -11,15 +12,24 @@ FfmpegRunner::FfmpegRunner(QObject *parent)
             this, &FfmpegRunner::onProcessFinished);
 }
 
-void FfmpegRunner::exportProject(const QJsonObject &project)
+FfmpegRunner::~FfmpegRunner()
+{
+    if (m_process.state() != QProcess::NotRunning) {
+        m_process.kill();
+        m_process.waitForFinished(3000);
+    }
+}
+
+void FfmpegRunner::exportProject(const QVariantMap &project)
 {
     if (m_running) return;
 
-    QStringList args = buildArguments(project);
+    QStringList args = buildArguments(QJsonObject::fromVariantMap(project));
     if (args.isEmpty()) return;
 
     setRunning(true);
     setProgress(0);
+    qDebug() << "ffmpeg" << args;
     m_process.start("ffmpeg", args);
 }
 
@@ -93,27 +103,30 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
         return {};
     }
 
-    QStringList args;
-    args << "-y";
-
     m_totalDuration = 0.0;
-    for (const auto &c : clips) {
-        args << "-i" << QDir(sourceFolder).filePath(c.toObject()["file"].toString());
+    for (const auto &c : clips)
         m_totalDuration += clipEffectiveDuration(c.toObject());
+
+    // Write concat demuxer list file
+    m_concatList.setFileTemplate(QDir::tempPath() + "/catozzo_concat_XXXXXX.txt");
+    if (!m_concatList.open()) {
+        emit error("Cannot create temporary concat list file.");
+        return {};
     }
+    for (const auto &c : clips) {
+        QString path = QDir(sourceFolder).filePath(c.toObject()["file"].toString());
+        path.replace("'", "'\\''");
+        m_concatList.write(QString("file '%1'\n").arg(path).toUtf8());
+    }
+    m_concatList.flush();
 
-    // Simple concat filter — transitions to be added in a future iteration
-    QString filterComplex;
-    int n = clips.size();
-    for (int i = 0; i < n; ++i)
-        filterComplex += QString("[%1:v][%1:a]").arg(i);
-    filterComplex += QString("concat=n=%1:v=1:a=1[outv][outa]").arg(n);
-
-    args << "-filter_complex" << filterComplex;
-    args << "-map" << "[outv]" << "-map" << "[outa]";
-    args << "-c:v" << "libx264" << "-crf" << "18" << "-preset" << "fast";
-    args << "-c:a" << "aac" << "-b:a" << "192k";
-    args << m_outputPath;
+    QStringList args;
+    args << "-y"
+         << "-f" << "concat"
+         << "-safe" << "0"
+         << "-i" << m_concatList.fileName()
+         << "-c" << "copy"
+         << m_outputPath;
 
     return args;
 }

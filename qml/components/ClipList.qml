@@ -8,7 +8,11 @@ ListView {
     required property var scanner
 
     clip: true
-    model: projectModel.data["clips"] ?? []
+
+    property var parsedData: JSON.parse(projectModel.dataJson || "{}")
+    property string sourceFolder: parsedData["source_folder"] ?? ""
+    property var clips: parsedData["clips"] ?? []
+    model: clips.length
 
     header: Rectangle {
         width: root.width
@@ -31,17 +35,14 @@ ListView {
 
     delegate: ClipRow {
         width: root.width
-        clipData: modelData
-        clipIndex: index
-        sourceFolder: root.projectModel.data["source_folder"] ?? ""
+        clipData: root.clips[index]
+        sourceFolder: root.sourceFolder
         scanner: root.scanner
-        onClipChanged: (idx, updated) => {
-            let clips = []
-            let src = root.projectModel.data["clips"]
-            for (let i = 0; i < src.length; i++)
-                clips.push(i === idx ? updated : src[i])
-            let data = Object.assign({}, root.projectModel.data)
-            data["clips"] = clips
+        onClipModified: (idx, updated) => {
+            let newClips = root.clips.slice()
+            newClips[idx] = updated
+            let data = Object.assign({}, root.parsedData)
+            data["clips"] = newClips
             root.projectModel.updateData(data)
         }
     }

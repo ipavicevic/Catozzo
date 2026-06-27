@@ -50,7 +50,8 @@ QJsonObject ClipScanner::probeClip(const QString &filePath)
     QJsonDocument doc = QJsonDocument::fromJson(output.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError) return result;
 
-    QJsonObject format = doc.object()["format"].toObject();
+    QJsonObject root = doc.object();
+    QJsonObject format = root["format"].toObject();
     QJsonObject tags = format["tags"].toObject();
 
     QString creationTime = tags["creation_time"].toString();
@@ -59,8 +60,18 @@ QJsonObject ClipScanner::probeClip(const QString &filePath)
 
     double duration = format["duration"].toString().toDouble();
 
+    bool hasAudio = false;
+    for (const QJsonValue &s : root["streams"].toArray()) {
+        if (s.toObject()["codec_type"].toString() == "audio") {
+            hasAudio = true;
+            break;
+        }
+    }
+
+
     result["recorded"] = creationTime.isEmpty() ? QJsonValue::Null : QJsonValue(creationTime);
     result["duration"] = duration;
+    result["has_audio"] = hasAudio;
 
     return result;
 }
@@ -95,7 +106,7 @@ QString ClipScanner::runFfprobe(const QString &filePath) const
     process.start("ffprobe", {
         "-v", "quiet",
         "-print_format", "json",
-        "-show_format",
+        "-show_entries", "format_tags=creation_time:format=duration:stream=codec_type",
         filePath
     });
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Catozzo VERSION 0.1.0 LANGUAGES CXX)
+project(Catozzo VERSION 0.1.11 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,6 +29,8 @@ qt_add_qml_module(Catozzo
     RESOURCE_PREFIX "/qt/qml"
 )
 
+target_compile_definitions(Catozzo PRIVATE APP_VERSION="${CMAKE_PROJECT_VERSION}")
+
 target_link_libraries(Catozzo PRIVATE
     Qt6::Core
     Qt6::Gui
@@ -37,6 +39,6 @@ target_link_libraries(Catozzo PRIVATE
 )
 
 set_target_properties(Catozzo PROPERTIES
-    WIN32_EXECUTABLE TRUE
+    WIN32_EXECUTABLE $<NOT:$<CONFIG:Debug>>
     MACOSX_BUNDLE TRUE
 )

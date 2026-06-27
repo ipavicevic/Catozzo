@@ -86,10 +86,10 @@ void ProjectModel::newProject(const QString &sourceFolder)
     emit isDirtyChanged();
 }
 
-void ProjectModel::updateData(const QJsonObject &data)
+void ProjectModel::updateData(const QVariantMap &data)
 {
     m_isDirty = true;
-    setData(data);
+    setData(QJsonObject::fromVariantMap(data));
     emit isDirtyChanged();
 }
 
