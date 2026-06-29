@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(Catozzo VERSION 0.1.14 LANGUAGES CXX)
+project(Catozzo VERSION 0.1.20 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,7 @@ qt_add_qml_module(Catozzo
     QML_FILES
         qml/Main.qml
         qml/components/Toolbar.qml
+        qml/components/SettingsBar.qml
         qml/components/ClipList.qml
         qml/components/ClipRow.qml
     RESOURCE_PREFIX "/qt/qml"

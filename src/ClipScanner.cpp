@@ -5,6 +5,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QStandardPaths>
 
 const QRegularExpression ClipScanner::s_goProPattern("^G[XH]\\d{6}$", QRegularExpression::CaseInsensitiveOption);
 
@@ -30,8 +31,7 @@ QJsonArray ClipScanner::scanFolder(const QString &folderPath)
         clip["file"] = filename;
         clip["enabled"] = true;
         clip["volume"] = QJsonValue::Null;
-        clip["segments"] = QJsonArray();
-        clip["transition"] = QJsonValue::Null;
+        clip["thumbnail"] = extractThumbnail(fullPath);
 
         clips.append(clip);
     }
@@ -98,6 +98,29 @@ QString ClipScanner::findLrv(const QString &mp4Path)
     QString lrvStem = "GL" + stem.mid(2);
     QString lrvPath = fi.dir().filePath(lrvStem + ".LRV");
     return QFile::exists(lrvPath) ? lrvPath : QString();
+}
+
+QString ClipScanner::extractThumbnail(const QString &filePath) const
+{
+    QString cacheDir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                       + "/thumbnails";
+    QDir().mkpath(cacheDir);
+
+    QString thumbPath = cacheDir + "/" + QFileInfo(filePath).baseName() + ".jpg";
+    if (QFile::exists(thumbPath))
+        return thumbPath;
+
+    QProcess process;
+    process.start("ffmpeg", {
+        "-i", filePath,
+        "-vframes", "1",
+        "-q:v", "3",
+        "-f", "image2",
+        "-y", thumbPath
+    });
+    process.waitForFinished(10000);
+
+    return QFile::exists(thumbPath) ? thumbPath : QString();
 }
 
 QString ClipScanner::runFfprobe(const QString &filePath) const

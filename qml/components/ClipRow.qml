@@ -33,6 +33,9 @@ Rectangle {
             height: 40
             fillMode: Image.PreserveAspectFit
             source: {
+                if (!root.clipData) return ""
+                let thumb = root.clipData["thumbnail"]
+                if (thumb) return "file:///" + thumb
                 if (!root.sourceFolder || !root.clipData["file"]) return ""
                 let thm = root.scanner.findThumbnail(root.sourceFolder + "/" + root.clipData["file"])
                 return thm ? "file:///" + thm : ""
@@ -78,36 +81,5 @@ Rectangle {
             }
         }
 
-        ComboBox {
-            Layout.preferredWidth: 120
-            model: ["default", "none", "crossfade", "fade_black"]
-            currentIndex: {
-                let t = root.clipData["transition"]
-                if (!t) return 0
-                let idx = ["none", "crossfade", "fade_black"].indexOf(t["type"] ?? "")
-                return idx >= 0 ? idx + 1 : 0
-            }
-            onActivated: {
-                let types = [null, "none", "crossfade", "fade_black"]
-                let type = types[currentIndex]
-                let transition = type ? { "type": type, "duration": root.clipData["transition"]?.["duration"] ?? 1.0 } : null
-                root.clipModified(root.index,
-                    Object.assign({}, root.clipData, { "transition": transition }))
-            }
-        }
-
-        SpinBox {
-            Layout.preferredWidth: 90
-            enabled: root.clipData["transition"] !== null && root.clipData["transition"] !== undefined
-            from: 1; to: 50; stepSize: 5
-            value: Math.round((root.clipData["transition"]?.["duration"] ?? 1.0) * 10)
-            textFromValue: (v) => (v / 10).toFixed(1) + "s"
-            valueFromText: (t) => Math.round(parseFloat(t) * 10)
-            onValueModified: {
-                let t = Object.assign({}, root.clipData["transition"], { "duration": value / 10 })
-                root.clipModified(root.index,
-                    Object.assign({}, root.clipData, { "transition": t }))
-            }
-        }
     }
 }

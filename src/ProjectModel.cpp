@@ -135,10 +135,12 @@ QJsonObject ProjectModel::buildNewProject(const QString &sourceFolder) const
     output["filename"] = "combined.mp4";
     project["output"] = output;
 
-    QJsonObject defaultTransition;
-    defaultTransition["type"] = "crossfade";
-    defaultTransition["duration"] = 1.0;
-    project["default_transition"] = defaultTransition;
+    QJsonObject transition;
+    transition["type"] = "none";
+    transition["duration"] = 1.0;
+    project["transition"] = transition;
+    project["fade_in"] = 0.0;
+    project["fade_out"] = 0.0;
 
     project["default_volume"] = 0.0;
     project["clips"] = QJsonArray();

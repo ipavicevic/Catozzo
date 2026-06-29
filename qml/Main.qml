@@ -30,6 +30,7 @@ ApplicationWindow {
 
     FfmpegRunner {
         id: ffmpeg
+        onLogLine: (line) => { if (line.trim()) console.log("[ffmpeg]", line.trim()) }
         onFinished: (success, path) => statusBar.showMessage(success ? "Export complete: " + path : "Export failed")
         onError: (msg) => statusBar.showMessage("Error: " + msg)
 onProgressChanged: exportProgress.value = ffmpeg.progress
@@ -44,6 +45,11 @@ onProgressChanged: exportProgress.value = ffmpeg.progress
             projectModel: projectModel
             scanner: scanner
             ffmpeg: ffmpeg
+        }
+
+        SettingsBar {
+            Layout.fillWidth: true
+            projectModel: projectModel
         }
 
         ClipList {

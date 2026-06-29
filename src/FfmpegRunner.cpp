@@ -29,6 +29,7 @@ void FfmpegRunner::exportProject(const QVariantMap &project)
 
     setRunning(true);
     setProgress(0);
+    qDebug() << "ffmpeg" << args.join(" ");
     m_process.start("ffmpeg", args);
 }
 
@@ -84,11 +85,21 @@ double FfmpegRunner::clipEffectiveDuration(const QJsonObject &clip) const
     return total;
 }
 
+
 QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
 {
     QString sourceFolder = project["source_folder"].toString();
     QJsonObject output = project["output"].toObject();
     m_outputPath = QDir(output["folder"].toString()).filePath(output["filename"].toString());
+
+    QJsonObject transition = project["transition"].toObject();
+    QString trType = transition["type"].toString();
+    double trDur   = transition["duration"].toDouble(1.0);
+    double fadeIn  = project["fade_in"].toDouble(0.0);
+    double fadeOut = project["fade_out"].toDouble(0.0);
+
+    bool hasTransition = (trType != "none" && !trType.isEmpty());
+    bool hasFade       = (fadeIn > 0.0 || fadeOut > 0.0);
 
     QJsonArray allClips = project["clips"].toArray();
     QJsonArray clips;
@@ -102,30 +113,131 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
         return {};
     }
 
-    m_totalDuration = 0.0;
-    for (const auto &c : clips)
-        m_totalDuration += clipEffectiveDuration(c.toObject());
+    int n = clips.size();
 
-    // Write concat demuxer list file (fresh file each export)
-    m_concatList = std::make_unique<QTemporaryFile>(QDir::tempPath() + "/catozzo_concat_XXXXXX.txt");
-    if (!m_concatList->open()) {
-        emit error("Cannot create temporary concat list file.");
-        return {};
+    m_totalDuration = 0.0;
+    QVector<double> durations(n);
+    for (int i = 0; i < n; ++i) {
+        durations[i] = clipEffectiveDuration(clips[i].toObject());
+        m_totalDuration += durations[i];
     }
-    for (const auto &c : clips) {
-        QString path = QDir(sourceFolder).filePath(c.toObject()["file"].toString());
-        path.replace("'", "'\\''");
-        m_concatList->write(QString("file '%1'\n").arg(path).toUtf8());
-    }
-    m_concatList->flush();
+
+    bool allHaveAudio = true;
+    for (const auto &c : clips)
+        if (!c.toObject()["has_audio"].toBool())
+            allHaveAudio = false;
 
     QStringList args;
-    args << "-y"
-         << "-f" << "concat"
-         << "-safe" << "0"
-         << "-i" << m_concatList->fileName()
-         << "-c" << "copy"
-         << m_outputPath;
+    args << "-y";
+
+    if (!hasTransition && !hasFade) {
+        // Fast path: stream copy via concat demuxer
+        m_concatList = std::make_unique<QTemporaryFile>(
+            QDir::tempPath() + "/catozzo_concat_XXXXXX.txt");
+        if (!m_concatList->open()) {
+            emit error("Cannot create temporary concat list file.");
+            return {};
+        }
+        for (const auto &c : clips) {
+            QString path = QDir(sourceFolder).filePath(c.toObject()["file"].toString());
+            path.replace("'", "'\\''");
+            m_concatList->write(QString("file '%1'\n").arg(path).toUtf8());
+        }
+        m_concatList->flush();
+
+        args << "-f" << "concat" << "-safe" << "0"
+             << "-i" << m_concatList->fileName()
+             << "-c" << "copy"
+             << m_outputPath;
+        return args;
+    }
+
+    // Re-encode path: transitions and/or fades
+    for (int i = 0; i < n; ++i)
+        args << "-i" << QDir(sourceFolder).filePath(clips[i].toObject()["file"].toString());
+
+    QString filterComplex;
+    QString prevV = "[0:v]";
+    QString prevA = allHaveAudio ? "[0:a]" : "";
+    double cumDuration = durations[0];
+
+    // Apply fade in on first clip
+    if (fadeIn > 0.0) {
+        filterComplex += QString("[0:v]fade=t=in:st=0:d=%1[fiv];").arg(fadeIn);
+        prevV = "[fiv]";
+        if (allHaveAudio) {
+            filterComplex += QString("[0:a]afade=t=in:st=0:d=%1[fia];").arg(fadeIn);
+            prevA = "[fia]";
+        }
+    }
+
+    // Chain clips with transitions
+    QString xfadeType = (trType == "crossfade") ? "dissolve" : "fade";
+    for (int i = 1; i < n; ++i) {
+        bool isLast = (i == n - 1);
+        QString outV = isLast ? "[outv]" : QString("[v%1]").arg(i);
+        QString outA = allHaveAudio ? (isLast ? "[outa]" : QString("[a%1]").arg(i)) : "";
+        QString curV = QString("[%1:v]").arg(i);
+        QString curA = allHaveAudio ? QString("[%1:a]").arg(i) : "";
+
+        if (hasTransition && n > 1) {
+            double offset = cumDuration - trDur;
+            filterComplex += QString("%1%2xfade=transition=%3:duration=%4:offset=%5%6;")
+                .arg(prevV, curV, xfadeType).arg(trDur).arg(offset).arg(outV);
+            if (allHaveAudio)
+                filterComplex += QString("%1%2acrossfade=d=%3%4;")
+                    .arg(prevA, curA).arg(trDur).arg(outA);
+            cumDuration += durations[i] - trDur;
+        } else {
+            filterComplex += QString("%1%2concat=n=2:v=1:a=0%3;").arg(prevV, curV, outV);
+            if (allHaveAudio)
+                filterComplex += QString("%1%2concat=n=2:v=0:a=1%3;").arg(prevA, curA, outA);
+            cumDuration += durations[i];
+        }
+
+        prevV = outV;
+        prevA = outA;
+    }
+
+    // If only one clip with fade but no transitions, label the output
+    if (n == 1) {
+        prevV = hasFade ? "[fiv]" : "[0:v]";
+        prevA = (allHaveAudio && hasFade) ? "[fia]" : (allHaveAudio ? "[0:a]" : "");
+        filterComplex.clear();
+        if (fadeIn > 0.0) {
+            filterComplex += QString("[0:v]fade=t=in:st=0:d=%1[fiv];").arg(fadeIn);
+            if (allHaveAudio)
+                filterComplex += QString("[0:a]afade=t=in:st=0:d=%1[fia];").arg(fadeIn);
+        }
+        prevV = fadeIn > 0.0 ? "[fiv]" : "[0:v]";
+        prevA = (allHaveAudio && fadeIn > 0.0) ? "[fia]" : (allHaveAudio ? "[0:a]" : "");
+    }
+
+    // Apply fade out on last output
+    if (fadeOut > 0.0) {
+        double startTime = cumDuration - fadeOut;
+        filterComplex += QString("%1fade=t=out:st=%2:d=%3[outv];")
+            .arg(prevV).arg(startTime).arg(fadeOut);
+        if (allHaveAudio)
+            filterComplex += QString("%1afade=t=out:st=%2:d=%3[outa];")
+                .arg(prevA).arg(startTime).arg(fadeOut);
+    } else {
+        // Rename final output labels if not already named
+        if (prevV != "[outv]")
+            filterComplex += QString("%1copy[outv];").arg(prevV);
+        if (allHaveAudio && prevA != "[outa]")
+            filterComplex += QString("%1acopy[outa];").arg(prevA);
+    }
+
+    if (filterComplex.endsWith(';'))
+        filterComplex.chop(1);
+
+    args << "-filter_complex" << filterComplex;
+    args << "-map" << "[outv]";
+    if (allHaveAudio) args << "-map" << "[outa]";
+    args << "-c:v" << "libx264" << "-crf" << "28" << "-preset" << "ultrafast";
+    if (allHaveAudio) args << "-c:a" << "aac" << "-b:a" << "192k";
+    args << m_outputPath;
 
     return args;
 }

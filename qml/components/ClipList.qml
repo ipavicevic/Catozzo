@@ -28,8 +28,6 @@ ListView {
             Label { text: "File"; Layout.preferredWidth: 220; font.bold: true }
             Label { text: "Duration"; Layout.preferredWidth: 80; font.bold: true }
             Label { text: "Volume"; Layout.preferredWidth: 90; font.bold: true }
-            Label { text: "Transition"; Layout.preferredWidth: 120; font.bold: true }
-            Label { text: "Trans. dur."; Layout.preferredWidth: 90; font.bold: true }
         }
     }
 

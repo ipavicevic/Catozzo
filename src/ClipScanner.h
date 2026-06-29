@@ -26,4 +26,5 @@ signals:
 private:
     static const QRegularExpression s_goProPattern;
     QString runFfprobe(const QString &filePath) const;
+    QString extractThumbnail(const QString &filePath) const;
 };
