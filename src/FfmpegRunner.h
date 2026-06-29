@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QProcess>
 #include <QTemporaryFile>
+#include <QStorageInfo>
 #include <memory>
 
 class FfmpegRunner : public QObject

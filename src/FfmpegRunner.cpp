@@ -1,7 +1,9 @@
 #include "FfmpegRunner.h"
 #include <QJsonArray>
 #include <QDir>
+#include <QFileInfo>
 #include <QRegularExpression>
+#include <QStorageInfo>
 #include <QDebug>
 
 FfmpegRunner::FfmpegRunner(QObject *parent)
@@ -127,6 +129,27 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
         if (!c.toObject()["has_audio"].toBool())
             allHaveAudio = false;
 
+    // Disk space check
+    qint64 estimatedBytes = 0;
+    if (!hasTransition && !hasFade) {
+        // Stream copy: output ≈ sum of input sizes
+        for (const auto &c : clips) {
+            QString path = QDir(sourceFolder).filePath(c.toObject()["file"].toString());
+            estimatedBytes += QFileInfo(path).size();
+        }
+    } else {
+        // Re-encode: estimate at ~8 Mbps (CRF 28 ultrafast, typical for 1080p/4K)
+        estimatedBytes = static_cast<qint64>(m_totalDuration * 8000000 / 8);
+    }
+    QStorageInfo storage(QFileInfo(m_outputPath).absoluteDir().absolutePath());
+    qint64 available = storage.bytesAvailable();
+    if (estimatedBytes > available) {
+        emit error(QString("Not enough disk space. Estimated output: %1 GB, available: %2 GB.")
+            .arg(estimatedBytes / 1e9, 0, 'f', 1)
+            .arg(available / 1e9, 0, 'f', 1));
+        return {};
+    }
+
     QStringList args;
     args << "-y";
 
@@ -156,31 +179,38 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
     for (int i = 0; i < n; ++i)
         args << "-i" << QDir(sourceFolder).filePath(clips[i].toObject()["file"].toString());
 
+    // Use a counter for intermediate labels so [outv]/[outa] are only assigned once at the end
+    int labelIdx = 0;
+    auto nextLabel = [&](const QString &prefix) {
+        return QString("[%1%2]").arg(prefix).arg(labelIdx++);
+    };
+
     QString filterComplex;
     QString prevV = "[0:v]";
     QString prevA = allHaveAudio ? "[0:a]" : "";
     double cumDuration = durations[0];
 
-    // Apply fade in on first clip
+    // Fade in
     if (fadeIn > 0.0) {
-        filterComplex += QString("[0:v]fade=t=in:st=0:d=%1[fiv];").arg(fadeIn);
-        prevV = "[fiv]";
+        QString outV = nextLabel("v");
+        filterComplex += QString("[0:v]fade=t=in:st=0:d=%1%2;").arg(fadeIn).arg(outV);
+        prevV = outV;
         if (allHaveAudio) {
-            filterComplex += QString("[0:a]afade=t=in:st=0:d=%1[fia];").arg(fadeIn);
-            prevA = "[fia]";
+            QString outA = nextLabel("a");
+            filterComplex += QString("[0:a]afade=t=in:st=0:d=%1%2;").arg(fadeIn).arg(outA);
+            prevA = outA;
         }
     }
 
-    // Chain clips with transitions
+    // Chain clips
     QString xfadeType = (trType == "crossfade") ? "dissolve" : "fade";
     for (int i = 1; i < n; ++i) {
-        bool isLast = (i == n - 1);
-        QString outV = isLast ? "[outv]" : QString("[v%1]").arg(i);
-        QString outA = allHaveAudio ? (isLast ? "[outa]" : QString("[a%1]").arg(i)) : "";
         QString curV = QString("[%1:v]").arg(i);
         QString curA = allHaveAudio ? QString("[%1:a]").arg(i) : "";
+        QString outV = nextLabel("v");
+        QString outA = allHaveAudio ? nextLabel("a") : "";
 
-        if (hasTransition && n > 1) {
+        if (hasTransition) {
             double offset = cumDuration - trDur;
             filterComplex += QString("%1%2xfade=transition=%3:duration=%4:offset=%5%6;")
                 .arg(prevV, curV, xfadeType).arg(trDur).arg(offset).arg(outV);
@@ -199,21 +229,7 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
         prevA = outA;
     }
 
-    // If only one clip with fade but no transitions, label the output
-    if (n == 1) {
-        prevV = hasFade ? "[fiv]" : "[0:v]";
-        prevA = (allHaveAudio && hasFade) ? "[fia]" : (allHaveAudio ? "[0:a]" : "");
-        filterComplex.clear();
-        if (fadeIn > 0.0) {
-            filterComplex += QString("[0:v]fade=t=in:st=0:d=%1[fiv];").arg(fadeIn);
-            if (allHaveAudio)
-                filterComplex += QString("[0:a]afade=t=in:st=0:d=%1[fia];").arg(fadeIn);
-        }
-        prevV = fadeIn > 0.0 ? "[fiv]" : "[0:v]";
-        prevA = (allHaveAudio && fadeIn > 0.0) ? "[fia]" : (allHaveAudio ? "[0:a]" : "");
-    }
-
-    // Apply fade out on last output
+    // Fade out — prevV/prevA are always intermediates here, safe to consume
     if (fadeOut > 0.0) {
         double startTime = cumDuration - fadeOut;
         filterComplex += QString("%1fade=t=out:st=%2:d=%3[outv];")
@@ -222,10 +238,8 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
             filterComplex += QString("%1afade=t=out:st=%2:d=%3[outa];")
                 .arg(prevA).arg(startTime).arg(fadeOut);
     } else {
-        // Rename final output labels if not already named
-        if (prevV != "[outv]")
-            filterComplex += QString("%1copy[outv];").arg(prevV);
-        if (allHaveAudio && prevA != "[outa]")
+        filterComplex += QString("%1copy[outv];").arg(prevV);
+        if (allHaveAudio)
             filterComplex += QString("%1acopy[outa];").arg(prevA);
     }
 
@@ -235,7 +249,8 @@ QStringList FfmpegRunner::buildArguments(const QJsonObject &project)
     args << "-filter_complex" << filterComplex;
     args << "-map" << "[outv]";
     if (allHaveAudio) args << "-map" << "[outa]";
-    args << "-c:v" << "libx264" << "-crf" << "28" << "-preset" << "ultrafast";
+    args << "-c:v" << "libx264" << "-crf" << "28" << "-preset" << "ultrafast"
+         << "-profile:v" << "high" << "-level:v" << "4.2" << "-pix_fmt" << "yuv420p";
     if (allHaveAudio) args << "-c:a" << "aac" << "-b:a" << "192k";
     args << m_outputPath;
 
